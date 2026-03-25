@@ -6,7 +6,7 @@ import { PartyAcceptanceModal } from '../modals/PartyAcceptanceModal';
 
 interface PartiesSectionProps {
   escrow: IEscrowExtended;
-  userRole: 'creator' | 'counterparty' | null;
+  userRole: 'creator' | 'counterparty' | 'arbitrator' | null;
 }
 
 // API functions for party acceptance/rejection
