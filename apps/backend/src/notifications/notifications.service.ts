@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import {
   NotificationChannel,
   NotificationEventType,
@@ -53,7 +54,9 @@ export class NotificationService {
     }
   }
 
+  @Cron(CronExpression.EVERY_30_SECONDS)
   async processPendingNotifications() {
+    this.logger.debug('Starting pending notifications processing');
     const pending = await this.repo.find({
       where: { status: NotificationStatus.PENDING },
       take: 50,
