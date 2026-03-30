@@ -67,6 +67,7 @@ fn test_create_escrow_fails_when_paused() {
         &token_address,
         &milestones,
         &deadline,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     assert_eq!(result, Err(Ok(Error::ContractPaused)));
@@ -111,6 +112,7 @@ fn test_deposit_funds_fails_when_paused() {
         &token_address,
         &milestones,
         &deadline,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     token_client.approve(&depositor, &contract_id, &10_000, &200);
@@ -165,6 +167,7 @@ fn test_create_and_get_escrow() {
         &token_address,
         &milestones,
         &deadline,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     let escrow = client.get_escrow(&escrow_id);
@@ -192,6 +195,7 @@ fn test_create_and_get_escrow() {
 
     // Payload assertion: Convert event.2 into a Vec<Val> and compare with expected Vec<Val>
     let actual_payload: soroban_sdk::Vec<soroban_sdk::Val> = event.2.into_val(&env);
+    let metadata_hash = BytesN::from_array(&env, &[0u8; 32]);
     let expected_payload: soroban_sdk::Vec<soroban_sdk::Val> = vec![
         &env,
         depositor.clone().into_val(&env),
@@ -199,6 +203,7 @@ fn test_create_and_get_escrow() {
         token_address.clone().into_val(&env),
         10000i128.into_val(&env),
         deadline.into_val(&env),
+        metadata_hash.into_val(&env),
     ];
     assert_eq!(actual_payload, expected_payload);
 
@@ -207,6 +212,177 @@ fn test_create_and_get_escrow() {
     assert_eq!(token_client.balance(&depositor), 10000);
     assert_eq!(token_client.balance(&contract_id), 0);
     assert_eq!(token_client.balance(&recipient), 0);
+}
+
+#[test]
+fn test_create_escrows_batch_and_get() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, VaultixEscrow);
+    let client = VaultixEscrowClient::new(&env, &contract_id);
+
+    let depositor = Address::generate(&env);
+    let recipient_1 = Address::generate(&env);
+    let recipient_2 = Address::generate(&env);
+    let token_address = Address::generate(&env);
+
+    let escrow_id_1 = 101u64;
+    let escrow_id_2 = 102u64;
+    let deadline_1 = 1706400000u64;
+    let deadline_2 = 1706403600u64;
+
+    let milestones_1 = vec![
+        &env,
+        Milestone {
+            amount: 3000,
+            status: MilestoneStatus::Pending,
+            description: symbol_short!("A"),
+        },
+        Milestone {
+            amount: 7000,
+            status: MilestoneStatus::Pending,
+            description: symbol_short!("B"),
+        },
+    ];
+    let milestones_2 = vec![
+        &env,
+        Milestone {
+            amount: 10_000,
+            status: MilestoneStatus::Pending,
+            description: symbol_short!("C"),
+        },
+    ];
+
+    let requests = vec![
+        &env,
+        CreateEscrowRequest {
+            escrow_id: escrow_id_1,
+            depositor: depositor.clone(),
+            recipient: recipient_1.clone(),
+            token_address: token_address.clone(),
+            milestones: milestones_1,
+            deadline: deadline_1,
+            metadata_hash: BytesN::from_array(&env, &[0u8; 32]),
+        },
+        CreateEscrowRequest {
+            escrow_id: escrow_id_2,
+            depositor: depositor.clone(),
+            recipient: recipient_2.clone(),
+            token_address: token_address.clone(),
+            milestones: milestones_2,
+            deadline: deadline_2,
+            metadata_hash: BytesN::from_array(&env, &[0u8; 32]),
+        },
+    ];
+
+    client.create_escrows_batch(&requests);
+
+    let escrow_1 = client.get_escrow(&escrow_id_1);
+    assert_eq!(escrow_1.depositor, depositor);
+    assert_eq!(escrow_1.recipient, recipient_1);
+    assert_eq!(escrow_1.token_address, token_address);
+    assert_eq!(escrow_1.total_amount, 10_000);
+    assert_eq!(escrow_1.total_released, 0);
+    assert_eq!(escrow_1.status, EscrowStatus::Created);
+    assert_eq!(escrow_1.deadline, deadline_1);
+
+    let escrow_2 = client.get_escrow(&escrow_id_2);
+    assert_eq!(escrow_2.depositor, escrow_1.depositor);
+    assert_eq!(escrow_2.recipient, recipient_2);
+    assert_eq!(escrow_2.token_address, escrow_1.token_address);
+    assert_eq!(escrow_2.total_amount, 10_000);
+    assert_eq!(escrow_2.total_released, 0);
+    assert_eq!(escrow_2.status, EscrowStatus::Created);
+    assert_eq!(escrow_2.deadline, deadline_2);
+
+    let events = env.events().all();
+    let event = events.last().unwrap();
+    assert_eq!(event.0, contract_id);
+
+    let expected_topics: soroban_sdk::Vec<soroban_sdk::Val> = (
+        Symbol::new(&env, "Vaultix"),
+        Symbol::new(&env, "EscrowsCreatedBatch"),
+    )
+        .into_val(&env);
+    assert_eq!(event.1, expected_topics);
+
+    let actual_items: soroban_sdk::Vec<EscrowCreatedBatchItem> = event.2.into_val(&env);
+    let expected_items: soroban_sdk::Vec<EscrowCreatedBatchItem> = vec![
+        &env,
+        EscrowCreatedBatchItem {
+            escrow_id: escrow_id_1,
+            depositor: escrow_1.depositor.clone(),
+            recipient: recipient_1,
+            token_address: escrow_1.token_address.clone(),
+            total_amount: 10_000,
+            deadline: deadline_1,
+        },
+        EscrowCreatedBatchItem {
+            escrow_id: escrow_id_2,
+            depositor: escrow_2.depositor.clone(),
+            recipient: recipient_2,
+            token_address: escrow_2.token_address.clone(),
+            total_amount: 10_000,
+            deadline: deadline_2,
+        },
+    ];
+    assert_eq!(actual_items, expected_items);
+}
+
+#[test]
+fn test_create_escrows_batch_is_atomic() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let contract_id = env.register_contract(None, VaultixEscrow);
+    let client = VaultixEscrowClient::new(&env, &contract_id);
+
+    let depositor = Address::generate(&env);
+    let recipient_1 = Address::generate(&env);
+    let recipient_2 = Address::generate(&env);
+    let token_address = Address::generate(&env);
+
+    let escrow_id = 201u64;
+    let milestones = vec![
+        &env,
+        Milestone {
+            amount: 10_000,
+            status: MilestoneStatus::Pending,
+            description: symbol_short!("X"),
+        },
+    ];
+
+    let requests = vec![
+        &env,
+        CreateEscrowRequest {
+            escrow_id,
+            depositor: depositor.clone(),
+            recipient: recipient_1,
+            token_address: token_address.clone(),
+            milestones: milestones.clone(),
+            deadline: 1706400000u64,
+            metadata_hash: BytesN::from_array(&env, &[0u8; 32]),
+        },
+        CreateEscrowRequest {
+            escrow_id,
+            depositor,
+            recipient: recipient_2,
+            token_address,
+            milestones,
+            deadline: 1706403600u64,
+            metadata_hash: BytesN::from_array(&env, &[0u8; 32]),
+        },
+    ];
+
+    let result = client.try_create_escrows_batch(&requests);
+    assert_eq!(result, Err(Ok(Error::EscrowAlreadyExists)));
+
+    let get_result = client.try_get_escrow(&escrow_id);
+    assert_eq!(get_result, Err(Ok(Error::EscrowNotFound)));
+
+    let events = env.events().all();
+    assert_eq!(events.len(), 0);
 }
 
 #[test]
@@ -250,6 +426,7 @@ fn test_deposit_funds() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Approve contract to spend tokens
@@ -312,6 +489,7 @@ fn test_release_milestone_with_tokens() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &10_000, &200);
     client.deposit_funds(&escrow_id);
@@ -376,6 +554,7 @@ fn test_dispute_blocks_release() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     token_client.approve(&depositor, &contract_id, &1000, &200);
@@ -428,6 +607,7 @@ fn test_complete_escrow_with_all_releases() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &10_000, &200);
     client.deposit_funds(&escrow_id);
@@ -481,6 +661,7 @@ fn test_cancel_escrow_with_refund() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &10_000, &200);
     client.deposit_funds(&escrow_id);
@@ -532,6 +713,7 @@ fn test_cancel_unfunded_escrow() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Cancel unfunded escrow (no refund needed)
@@ -582,6 +764,7 @@ fn test_admin_resolves_dispute_to_recipient() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     token_client.approve(&depositor, &contract_id, &10000, &200);
@@ -646,6 +829,7 @@ fn test_admin_resolves_dispute_to_depositor() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     token_client.approve(&depositor, &contract_id, &5000, &200);
@@ -706,6 +890,7 @@ fn test_raise_dispute_happy_path() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     let events_before = env.events().all().len();
@@ -767,6 +952,7 @@ fn test_raise_dispute_invalid_status() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &5000, &200);
     client.deposit_funds(&escrow_id_completed);
@@ -785,6 +971,7 @@ fn test_raise_dispute_invalid_status() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &5000, &200);
     client.deposit_funds(&escrow_id_cancelled);
@@ -831,6 +1018,7 @@ fn test_resolve_dispute_invalid_winner_or_overflow() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &1000, &200);
     client.deposit_funds(&escrow_id);
@@ -881,6 +1069,7 @@ fn test_resolve_dispute_while_paused() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &5000, &200);
     client.deposit_funds(&escrow_id);
@@ -931,6 +1120,7 @@ fn test_duplicate_escrow_id() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     client.create_escrow(
         &escrow_id,
@@ -939,6 +1129,7 @@ fn test_duplicate_escrow_id() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 }
 
@@ -978,6 +1169,7 @@ fn test_double_release() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &1000, &200);
     client.deposit_funds(&escrow_id);
@@ -1023,6 +1215,7 @@ fn test_too_many_milestones() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 }
 
@@ -1059,6 +1252,7 @@ fn test_invalid_milestone_amount() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 }
 
@@ -1096,6 +1290,7 @@ fn test_unauthorized_confirm_delivery() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     token_client.approve(&buyer, &contract_id, &1000, &200);
@@ -1137,6 +1332,7 @@ fn test_double_confirm_delivery() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     token_client.approve(&buyer, &contract_id, &1000, &200);
@@ -1178,6 +1374,7 @@ fn test_zero_amount_milestone_rejected() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     assert_eq!(result, Err(Ok(Error::ZeroAmount)));
@@ -1214,6 +1411,7 @@ fn test_negative_amount_milestone_rejected() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     assert_eq!(result, Err(Ok(Error::ZeroAmount)));
@@ -1249,6 +1447,7 @@ fn test_self_dealing_rejected() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     assert_eq!(result, Err(Ok(Error::SelfDealing)));
@@ -1290,6 +1489,7 @@ fn test_valid_escrow_creation_succeeds() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     assert!(result.is_ok());
@@ -1335,6 +1535,7 @@ fn test_double_deposit_rejected() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     token_client.approve(&depositor, &contract_id, &10_000, &200);
@@ -1379,6 +1580,7 @@ fn test_cancel_active_escrow_retains_fee() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &10_000, &200);
     client.deposit_funds(&escrow_id);
@@ -1432,6 +1634,7 @@ fn test_release_milestone_before_deposit() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Try to release milestone before depositing funds
@@ -1478,6 +1681,7 @@ fn test_refund_expired_authorization_check() {
         &token_address,
         &milestones,
         &deadline,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &10_000, &200);
     client.deposit_funds(&escrow_id);
@@ -1538,6 +1742,7 @@ fn test_resolve_dispute_fails_without_arbitrator_initialized() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     token_client.approve(&depositor, &contract_id, &1000, &200);
     client.deposit_funds(&escrow_id);
@@ -1710,6 +1915,7 @@ fn test_release_milestone_uses_global_fee_by_default() {
         &token_address,
         &milestones,
         &(env.ledger().timestamp() + 3600),
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Approve contract to transfer depositor's tokens, then deposit
@@ -1765,6 +1971,7 @@ fn test_release_milestone_uses_token_fee_override() {
         &token_address,
         &milestones,
         &(env.ledger().timestamp() + 3600),
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Approve contract to transfer depositor's tokens, then deposit
@@ -1825,6 +2032,7 @@ fn test_release_milestone_uses_escrow_fee_override() {
         &token_address,
         &milestones,
         &(env.ledger().timestamp() + 3600),
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Approve contract to transfer depositor's tokens, then deposit
@@ -1881,6 +2089,7 @@ fn test_cancel_escrow_uses_token_fee_override() {
         &token_address,
         &milestones,
         &(env.ledger().timestamp() + 3600),
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Approve contract to transfer depositor's tokens, then deposit
@@ -2004,6 +2213,7 @@ fn test_refund_expired_uses_escrow_fee_override() {
         &token_address,
         &milestones,
         &deadline,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Approve contract to transfer depositor's tokens, then deposit
@@ -2119,6 +2329,7 @@ fn test_zero_fee_valid() {
         &token_address,
         &milestones,
         &(env.ledger().timestamp() + 3600),
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
     // Approve contract to transfer depositor's tokens, then deposit
     token_client.approve(&depositor, &contract_id, &10_000, &200);
@@ -2167,6 +2378,7 @@ fn test_configure_multisig_threshold() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Configure multisig: threshold of 3000 and require 2 signatures
@@ -2213,6 +2425,7 @@ fn test_collect_signature() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Configure multisig: threshold of 3000 and require 2 signatures
@@ -2269,6 +2482,7 @@ fn test_release_milestone_below_threshold_single_signature() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Configure multisig: threshold of 3000 and require 2 signatures
@@ -2322,6 +2536,7 @@ fn test_release_milestone_above_threshold_insufficient_signatures() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Configure multisig: threshold of 3000 and require 2 signatures
@@ -2369,6 +2584,7 @@ fn test_release_milestone_above_threshold_sufficient_signatures() {
         &token_address,
         &milestones,
         &1706400000u64,
+        &BytesN::from_array(&env, &[0u8; 32]),
     );
 
     // Configure multisig: threshold of 3000 and require 2 signatures
