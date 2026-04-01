@@ -3,6 +3,8 @@ import {
   NotFoundException,
   ForbiddenException,
   Logger,
+  OnModuleDestroy,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
@@ -15,13 +17,23 @@ import * as crypto from 'crypto';
 import axios from 'axios';
 
 @Injectable()
-export class WebhookService {
+export class WebhookService implements OnModuleDestroy {
   private readonly logger = new Logger(WebhookService.name);
+  private timeouts: Map<string, NodeJS.Timeout> = new Map();
+  private readonly MAX_WEBHOOKS_PER_USER = 10;
+  private readonly MAX_EVENTS_PER_WEBHOOK = 8;
 
   constructor(
     @InjectRepository(Webhook)
     private readonly webhookRepo: Repository<Webhook>,
   ) {}
+
+  onModuleDestroy() {
+    for (const timeout of this.timeouts.values()) {
+      clearTimeout(timeout);
+    }
+    this.timeouts.clear();
+  }
 
   async createWebhook(
     userId: string,
@@ -29,7 +41,21 @@ export class WebhookService {
     secret: string,
     events: WebhookEvent[],
   ): Promise<Webhook> {
-    // TODO: Add rate limiting logic here
+    // Check maximum events per webhook
+    if (events.length > this.MAX_EVENTS_PER_WEBHOOK) {
+      throw new UnprocessableEntityException(
+        `Maximum ${this.MAX_EVENTS_PER_WEBHOOK} events allowed per webhook`,
+      );
+    }
+
+    // Check maximum webhooks per user
+    const existingWebhooks = await this.getUserWebhooks(userId);
+    if (existingWebhooks.length >= this.MAX_WEBHOOKS_PER_USER) {
+      throw new UnprocessableEntityException(
+        `Maximum ${this.MAX_WEBHOOKS_PER_USER} webhooks allowed per user`,
+      );
+    }
+
     const webhook = this.webhookRepo.create({
       url,
       secret,
@@ -96,10 +122,12 @@ export class WebhookService {
         `Webhook delivery failed (attempt ${attempt}) to ${webhook.url}: ${errorMsg}`,
       );
       if (attempt < maxAttempts) {
-        setTimeout(
-          () => void this.deliverWebhook(webhook, payload, attempt + 1),
-          backoff,
-        );
+        const timeoutId = `${webhook.id}-${attempt}`;
+        const timeout = setTimeout(() => {
+          this.timeouts.delete(timeoutId);
+          void this.deliverWebhook(webhook, payload, attempt + 1);
+        }, backoff);
+        this.timeouts.set(timeoutId, timeout);
       } else {
         this.logger.error(
           `Webhook delivery permanently failed to ${webhook.url}`,

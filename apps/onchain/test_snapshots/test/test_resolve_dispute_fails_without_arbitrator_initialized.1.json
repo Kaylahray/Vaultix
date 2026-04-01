@@ -110,6 +110,9 @@
                 },
                 {
                   "u64": 1706400000
+                },
+                {
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -270,7 +273,7 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "escrow"
+                  "symbol": "esc2"
                 },
                 {
                   "u64": 1
@@ -290,7 +293,7 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "escrow"
+                      "symbol": "esc2"
                     },
                     {
                       "u64": 1
@@ -300,6 +303,14 @@
                 "durability": "persistent",
                 "val": {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "collected_signatures"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "deadline"
@@ -314,6 +325,25 @@
                       },
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "fee_override_bps"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": -1,
+                          "lo": 18446744073709551615
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "metadata_hash"
+                      },
+                      "val": {
+                        "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                       }
                     },
                     {
@@ -362,6 +392,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "packed_state"
+                      },
+                      "val": {
+                        "u32": 4
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "recipient"
                       },
                       "val": {
@@ -370,26 +408,21 @@
                     },
                     {
                       "key": {
-                        "symbol": "resolution"
+                        "symbol": "required_signatures"
                       },
                       "val": {
-                        "vec": [
-                          {
-                            "symbol": "None"
-                          }
-                        ]
+                        "u32": 1
                       }
                     },
                     {
                       "key": {
-                        "symbol": "status"
+                        "symbol": "threshold_amount"
                       },
                       "val": {
-                        "vec": [
-                          {
-                            "symbol": "Disputed"
-                          }
-                        ]
+                        "i128": {
+                          "hi": 0,
+                          "lo": 10000
+                        }
                       }
                     },
                     {
@@ -1291,6 +1324,9 @@
                 },
                 {
                   "u64": 1706400000
+                },
+                {
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -1336,6 +1372,9 @@
                 },
                 {
                   "u64": 1706400000
+                },
+                {
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }

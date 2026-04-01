@@ -160,6 +160,9 @@
                 },
                 {
                   "u64": 1
+                },
+                {
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -321,7 +324,7 @@
             "key": {
               "vec": [
                 {
-                  "symbol": "escfee"
+                  "symbol": "esc2"
                 },
                 {
                   "u64": 1
@@ -341,55 +344,7 @@
                 "key": {
                   "vec": [
                     {
-                      "symbol": "escfee"
-                    },
-                    {
-                      "u64": 1
-                    }
-                  ]
-                },
-                "durability": "persistent",
-                "val": {
-                  "i128": {
-                    "hi": 0,
-                    "lo": 500
-                  }
-                }
-              }
-            },
-            "ext": "v0"
-          },
-          4095
-        ]
-      ],
-      [
-        {
-          "contract_data": {
-            "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-            "key": {
-              "vec": [
-                {
-                  "symbol": "escrow"
-                },
-                {
-                  "u64": 1
-                }
-              ]
-            },
-            "durability": "persistent"
-          }
-        },
-        [
-          {
-            "last_modified_ledger_seq": 0,
-            "data": {
-              "contract_data": {
-                "ext": "v0",
-                "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-                "key": {
-                  "vec": [
-                    {
-                      "symbol": "escrow"
+                      "symbol": "esc2"
                     },
                     {
                       "u64": 1
@@ -399,6 +354,14 @@
                 "durability": "persistent",
                 "val": {
                   "map": [
+                    {
+                      "key": {
+                        "symbol": "collected_signatures"
+                      },
+                      "val": {
+                        "vec": []
+                      }
+                    },
                     {
                       "key": {
                         "symbol": "deadline"
@@ -413,6 +376,25 @@
                       },
                       "val": {
                         "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "fee_override_bps"
+                      },
+                      "val": {
+                        "i128": {
+                          "hi": 0,
+                          "lo": 500
+                        }
+                      }
+                    },
+                    {
+                      "key": {
+                        "symbol": "metadata_hash"
+                      },
+                      "val": {
+                        "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                       }
                     },
                     {
@@ -461,6 +443,14 @@
                     },
                     {
                       "key": {
+                        "symbol": "packed_state"
+                      },
+                      "val": {
+                        "u32": 6
+                      }
+                    },
+                    {
+                      "key": {
                         "symbol": "recipient"
                       },
                       "val": {
@@ -469,26 +459,21 @@
                     },
                     {
                       "key": {
-                        "symbol": "resolution"
+                        "symbol": "required_signatures"
                       },
                       "val": {
-                        "vec": [
-                          {
-                            "symbol": "None"
-                          }
-                        ]
+                        "u32": 1
                       }
                     },
                     {
                       "key": {
-                        "symbol": "status"
+                        "symbol": "threshold_amount"
                       },
                       "val": {
-                        "vec": [
-                          {
-                            "symbol": "Expired"
-                          }
-                        ]
+                        "i128": {
+                          "hi": 0,
+                          "lo": 10000
+                        }
                       }
                     },
                     {
@@ -1778,6 +1763,9 @@
                 },
                 {
                   "u64": 1
+                },
+                {
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }
@@ -1823,6 +1811,9 @@
                 },
                 {
                   "u64": 1
+                },
+                {
+                  "bytes": "0000000000000000000000000000000000000000000000000000000000000000"
                 }
               ]
             }

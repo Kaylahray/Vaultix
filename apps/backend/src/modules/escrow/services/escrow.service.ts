@@ -35,9 +35,11 @@ import { FulfillConditionDto } from '../dto/fulfill-condition.dto';
 import { FileDisputeDto, ResolveDisputeDto } from '../dto/dispute.dto';
 import { FundEscrowDto } from '../dto/fund-escrow.dto';
 import { ExpireEscrowDto } from '../dto/expire-escrow.dto';
+import { ProposeMilestoneChangeDto } from '../dto/milestone-change.dto';
 import { validateTransition, isTerminalStatus } from '../escrow-state-machine';
 import { EscrowStellarIntegrationService } from './escrow-stellar-integration.service';
 import { WebhookService } from '../../../services/webhook/webhook.service';
+import { User, UserRole } from '../../user/entities/user.entity';
 
 @Injectable()
 export class EscrowService {
@@ -52,6 +54,8 @@ export class EscrowService {
     private eventRepository: Repository<EscrowEvent>,
     @InjectRepository(Dispute)
     private disputeRepository: Repository<Dispute>,
+    @InjectRepository(User)
+    private userRepository: Repository<User>,
 
     private readonly stellarIntegrationService: EscrowStellarIntegrationService,
     private readonly webhookService: WebhookService,
@@ -167,13 +171,13 @@ export class EscrowService {
     if (role === EscrowOverviewRole.DEPOSITOR) {
       qb.where('escrow.creatorId = :userId', { userId });
     } else if (role === EscrowOverviewRole.RECIPIENT) {
-      qb.where(`EXISTS (${recipientExistsSubquery})`, { userId });
+      qb.where(`EXISTS ${recipientExistsSubquery}`, { userId });
     } else {
       qb.where(
         new Brackets((overviewScope) => {
           overviewScope
             .where('escrow.creatorId = :userId', { userId })
-            .orWhere(`EXISTS (${recipientExistsSubquery})`, { userId });
+            .orWhere(`EXISTS ${recipientExistsSubquery}`, { userId });
         }),
       );
     }
@@ -406,44 +410,27 @@ export class EscrowService {
   ): Promise<Escrow> {
     const escrow = await this.findOne(id);
 
-    if (isTerminalStatus(escrow.status)) {
-      throw new BadRequestException(
-        `Cannot expire an escrow that is already ${escrow.status}`,
-      );
-    }
-
-    const isArbitrator = escrow.parties?.some(
-      (party) => party.role === PartyRole.ARBITRATOR && party.userId === userId,
-    );
-    if (escrow.creatorId !== userId && !isArbitrator) {
+    const isAdmin = await this.isUserAdmin(userId);
+    if (escrow.creatorId !== userId && !isAdmin) {
       throw new ForbiddenException(
-        'Only the creator or arbitrator can expire this escrow',
+        'Only the creator or an admin can expire this escrow',
       );
     }
 
-    validateTransition(escrow.status, EscrowStatus.EXPIRED);
-
-    await this.escrowRepository.update(id, {
-      status: EscrowStatus.EXPIRED,
-      isActive: false,
-    });
-
-    await this.logEvent(
-      id,
-      EscrowEventType.EXPIRED,
-      userId,
-      {
-        reason: dto.reason ?? 'Manually expired',
-        previousStatus: escrow.status,
-      },
+    return this.expireEscrow(escrow, {
+      actorId: userId,
       ipAddress,
-    );
-    await this.webhookService.dispatchEvent('escrow.expired', {
-      escrowId: id,
-      reason: dto.reason ?? null,
+      reason: dto.reason ?? 'Manually expired',
+      webhookReason: dto.reason ?? null,
     });
+  }
 
-    return this.findOne(id);
+  async expireBySystem(id: string, reason: string): Promise<Escrow> {
+    const escrow = await this.findOne(id);
+    return this.expireEscrow(escrow, {
+      reason,
+      webhookReason: reason,
+    });
   }
 
   async fund(
@@ -871,28 +858,28 @@ export class EscrowService {
   ): Promise<Dispute> {
     const escrow = await this.findOne(escrowId);
 
-    if (escrow.status !== EscrowStatus.ACTIVE) {
-      throw new BadRequestException(
-        'Disputes can only be filed against active escrows',
-      );
-    }
-
-    // Only a buyer or seller party may file — arbitrators mediate, they don't file
-    const filingParty = escrow.parties?.find(
-      (p) => p.userId === userId && p.role !== PartyRole.ARBITRATOR,
-    );
-    if (!filingParty) {
-      throw new ForbiddenException(
-        'Only a buyer or seller party can file a dispute',
-      );
-    }
-
     const existing = await this.disputeRepository.findOne({
       where: { escrowId },
     });
     if (existing) {
       throw new ConflictException(
         'A dispute has already been filed for this escrow',
+      );
+    }
+
+    if (escrow.status !== EscrowStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Disputes can only be filed against active escrows',
+      );
+    }
+
+    const isBuyer = escrow.creatorId === userId;
+    const filingParty = escrow.parties?.find(
+      (p) => p.userId === userId && p.role !== PartyRole.ARBITRATOR,
+    );
+    if (!isBuyer && !filingParty) {
+      throw new ForbiddenException(
+        'Only a buyer or seller party can file a dispute',
       );
     }
 
@@ -1030,10 +1017,134 @@ export class EscrowService {
     }) as Promise<Dispute>;
   }
 
+  async proposeMilestoneChange(
+    escrowId: string,
+    conditionId: string,
+    dto: ProposeMilestoneChangeDto,
+    userId: string,
+  ): Promise<Condition> {
+    const escrow = await this.escrowRepository.findOne({
+      where: { id: escrowId },
+      relations: ['conditions', 'parties'],
+    });
+
+    if (!escrow) throw new NotFoundException('Escrow not found');
+
+    if (escrow.status !== EscrowStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Milestones can only be changed when the escrow is ACTIVE',
+      );
+    }
+
+    const isBuyer =
+      escrow.creatorId === userId ||
+      escrow.parties.some(
+        (p) => p.userId === userId && p.role === PartyRole.BUYER,
+      );
+    const isSeller = escrow.parties.some(
+      (p) => p.userId === userId && p.role === PartyRole.SELLER,
+    );
+    if (!isBuyer && !isSeller) {
+      throw new ForbiddenException(
+        'Only the buyer or seller can propose milestone changes',
+      );
+    }
+
+    const condition = escrow.conditions.find((c) => c.id === conditionId);
+    if (!condition) throw new NotFoundException('Condition not found');
+
+    if (condition.isFulfilled || condition.isMet) {
+      throw new BadRequestException(
+        'Cannot change a milestone that is already fulfilled or met',
+      );
+    }
+
+    if (dto.amount === undefined && dto.description === undefined) {
+      throw new BadRequestException(
+        'Must propose at least one change (amount or description)',
+      );
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    condition.proposedAmount = (dto.amount ?? null) as any;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    condition.proposedDescription = (dto.description ?? null) as any;
+    condition.proposedByUserId = userId;
+
+    await this.conditionRepository.save(condition);
+    return condition;
+  }
+
+  async acceptMilestoneChange(
+    escrowId: string,
+    conditionId: string,
+    userId: string,
+  ): Promise<Condition> {
+    const escrow = await this.escrowRepository.findOne({
+      where: { id: escrowId },
+      relations: ['conditions', 'parties'],
+    });
+
+    if (!escrow) throw new NotFoundException('Escrow not found');
+
+    if (escrow.status !== EscrowStatus.ACTIVE) {
+      throw new BadRequestException(
+        'Milestones can only be changed when the escrow is ACTIVE',
+      );
+    }
+
+    const isBuyer =
+      escrow.creatorId === userId ||
+      escrow.parties.some(
+        (p) => p.userId === userId && p.role === PartyRole.BUYER,
+      );
+    const isSeller = escrow.parties.some(
+      (p) => p.userId === userId && p.role === PartyRole.SELLER,
+    );
+    if (!isBuyer && !isSeller) {
+      throw new ForbiddenException(
+        'Only the buyer or seller can accept milestone changes',
+      );
+    }
+
+    const condition = escrow.conditions.find((c) => c.id === conditionId);
+    if (!condition) throw new NotFoundException('Condition not found');
+
+    if (!condition.proposedByUserId) {
+      throw new BadRequestException('No pending proposal for this milestone');
+    }
+
+    if (condition.proposedByUserId === userId) {
+      throw new ForbiddenException(
+        'You cannot accept your own proposed changes',
+      );
+    }
+
+    if (
+      condition.proposedAmount !== null &&
+      condition.proposedAmount !== undefined
+    ) {
+      condition.amount = condition.proposedAmount;
+    }
+    if (condition.proposedDescription) {
+      condition.description = condition.proposedDescription;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    condition.proposedAmount = null as any;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    condition.proposedDescription = null as any;
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+    condition.proposedByUserId = null as any;
+
+    await this.conditionRepository.save(condition);
+    return condition;
+  }
+
   private async logEvent(
     escrowId: string,
     eventType: EscrowEventType,
-    actorId: string,
+    actorId?: string,
     data?: Record<string, any>,
     ipAddress?: string,
   ): Promise<EscrowEvent> {
@@ -1046,5 +1157,63 @@ export class EscrowService {
     });
 
     return this.eventRepository.save(event);
+  }
+
+  async isUserAdmin(userId: string): Promise<boolean> {
+    const user = await this.userRepository.findOne({
+      where: { id: userId },
+    });
+
+    return user?.role === UserRole.ADMIN || user?.role === UserRole.SUPER_ADMIN;
+  }
+
+  private async expireEscrow(
+    escrow: Escrow,
+    options: {
+      actorId?: string;
+      ipAddress?: string;
+      reason: string;
+      webhookReason: string | null;
+    },
+  ): Promise<Escrow> {
+    if (isTerminalStatus(escrow.status)) {
+      throw new BadRequestException(
+        `Cannot expire an escrow that is already ${escrow.status}`,
+      );
+    }
+
+    if (
+      escrow.status !== EscrowStatus.PENDING &&
+      escrow.status !== EscrowStatus.ACTIVE
+    ) {
+      throw new BadRequestException(
+        'Escrow can only be expired while in pending or active status',
+      );
+    }
+
+    validateTransition(escrow.status, EscrowStatus.EXPIRED);
+
+    await this.escrowRepository.update(escrow.id, {
+      status: EscrowStatus.EXPIRED,
+      isActive: false,
+    });
+
+    await this.logEvent(
+      escrow.id,
+      EscrowEventType.EXPIRED,
+      options.actorId,
+      {
+        reason: options.reason,
+        previousStatus: escrow.status,
+      },
+      options.ipAddress,
+    );
+
+    await this.webhookService.dispatchEvent('escrow.expired', {
+      escrowId: escrow.id,
+      reason: options.webhookReason,
+    });
+
+    return this.findOne(escrow.id);
   }
 }
