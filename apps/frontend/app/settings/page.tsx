@@ -58,7 +58,7 @@ function SectionCard({ title, icon: Icon, children }: {
 
 // ── Profile Section ────────────────────────────────────────────────────────
 
-function ProfileSection() {
+function ProfileSectionInner() {
   const { wallet } = useWallet();
   const [copied, setCopied] = useState(false);
 
@@ -71,34 +71,43 @@ function ProfileSection() {
   };
 
   return (
-    <SectionCard title="Profile" icon={User}>
-      <div className="space-y-3">
-        <div>
-          <p className="text-xs text-gray-500 mb-1">Connected wallet</p>
-          {wallet ? (
-            <div className="flex items-center gap-2">
-              <code className="text-sm font-mono bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg break-all">
-                {wallet.publicKey}
-              </code>
-              <button
-                onClick={handleCopy}
-                className="flex-shrink-0 p-1.5 rounded hover:bg-gray-100 transition-colors"
-                aria-label="Copy address"
-              >
-                {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4 text-gray-400" />}
-              </button>
-            </div>
-          ) : (
-            <p className="text-sm text-gray-400 italic">No wallet connected</p>
-          )}
-        </div>
-        {wallet && (
-          <div className="flex gap-4 text-sm text-gray-500">
-            <span>Network: <span className="font-medium text-gray-700 capitalize">{wallet.network}</span></span>
-            <span>Provider: <span className="font-medium text-gray-700 capitalize">{wallet.walletType}</span></span>
+    <div className="space-y-3">
+      <div>
+        <p className="text-xs text-gray-500 mb-1">Connected wallet</p>
+        {wallet ? (
+          <div className="flex items-center gap-2">
+            <code className="text-sm font-mono bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg break-all">
+              {wallet.publicKey}
+            </code>
+            <button
+              onClick={handleCopy}
+              className="flex-shrink-0 p-1.5 rounded hover:bg-gray-100 transition-colors"
+              aria-label="Copy address"
+            >
+              {copied ? <Check className="w-4 h-4 text-green-500" /> : <Copy className="w-4 h-4 text-gray-400" />}
+            </button>
           </div>
+        ) : (
+          <p className="text-sm text-gray-400 italic">No wallet connected</p>
         )}
       </div>
+      {wallet && (
+        <div className="flex gap-4 text-sm text-gray-500">
+          <span>Network: <span className="font-medium text-gray-700 capitalize">{wallet.network}</span></span>
+          <span>Provider: <span className="font-medium text-gray-700 capitalize">{wallet.walletType}</span></span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ProfileSection() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  return (
+    <SectionCard title="Profile" icon={User}>
+      {mounted ? <ProfileSectionInner /> : <p className="text-sm text-gray-400 italic">Loading…</p>}
     </SectionCard>
   );
 }
