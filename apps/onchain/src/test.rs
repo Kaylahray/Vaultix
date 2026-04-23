@@ -179,33 +179,34 @@ fn test_create_and_get_escrow() {
     assert_eq!(escrow.status, EscrowStatus::Created);
     assert_eq!(escrow.milestones.len(), 3);
 
-    // Verify Create Event (Refactored Schema)
+    // Verify canonical create event schema
     let events = env.events().all();
     let event = events.last().unwrap();
     assert_eq!(event.0, contract_id);
 
-    // Topics assertion: Convert tuple to Vec<Val>
     let expected_topics: soroban_sdk::Vec<soroban_sdk::Val> = (
         Symbol::new(&env, "Vaultix"),
+        Symbol::new(&env, "v1"),
         Symbol::new(&env, "EscrowCreated"),
-        escrow_id,
     )
         .into_val(&env);
     assert_eq!(event.1, expected_topics);
 
-    // Payload assertion: Convert event.2 into a Vec<Val> and compare with expected Vec<Val>
-    let actual_payload: soroban_sdk::Vec<soroban_sdk::Val> = event.2.into_val(&env);
     let metadata_hash = BytesN::from_array(&env, &[0u8; 32]);
-    let expected_payload: soroban_sdk::Vec<soroban_sdk::Val> = vec![
-        &env,
-        depositor.clone().into_val(&env),
-        recipient.clone().into_val(&env),
-        token_address.clone().into_val(&env),
-        10000i128.into_val(&env),
-        deadline.into_val(&env),
-        metadata_hash.into_val(&env),
-    ];
-    assert_eq!(actual_payload, expected_payload);
+    let actual_payload: EscrowCreatedEvent = event.2.into_val(&env);
+    assert_eq!(
+        actual_payload,
+        EscrowCreatedEvent {
+            escrow_id,
+            depositor: depositor.clone(),
+            recipient: recipient.clone(),
+            token_address: token_address.clone(),
+            total_amount: 10000,
+            deadline,
+            metadata_hash,
+            timestamp: 0,
+        }
+    );
 
     assert_eq!(escrow.deadline, deadline);
 
@@ -302,32 +303,42 @@ fn test_create_escrows_batch_and_get() {
 
     let expected_topics: soroban_sdk::Vec<soroban_sdk::Val> = (
         Symbol::new(&env, "Vaultix"),
-        Symbol::new(&env, "EscrowsCreatedBatch"),
+        Symbol::new(&env, "v1"),
+        Symbol::new(&env, "EscrowCreatedBatch"),
     )
         .into_val(&env);
     assert_eq!(event.1, expected_topics);
 
-    let actual_items: soroban_sdk::Vec<EscrowCreatedBatchItem> = event.2.into_val(&env);
-    let expected_items: soroban_sdk::Vec<EscrowCreatedBatchItem> = vec![
+    let actual_payload: EscrowCreatedBatchEvent = event.2.into_val(&env);
+    let expected_items: soroban_sdk::Vec<EscrowCreatedBatchEventItem> = vec![
         &env,
-        EscrowCreatedBatchItem {
+        EscrowCreatedBatchEventItem {
             escrow_id: escrow_id_1,
             depositor: escrow_1.depositor.clone(),
             recipient: recipient_1,
             token_address: escrow_1.token_address.clone(),
             total_amount: 10_000,
             deadline: deadline_1,
+            metadata_hash: BytesN::from_array(&env, &[0u8; 32]),
         },
-        EscrowCreatedBatchItem {
+        EscrowCreatedBatchEventItem {
             escrow_id: escrow_id_2,
             depositor: escrow_2.depositor.clone(),
             recipient: recipient_2,
             token_address: escrow_2.token_address.clone(),
             total_amount: 10_000,
             deadline: deadline_2,
+            metadata_hash: BytesN::from_array(&env, &[0u8; 32]),
         },
     ];
-    assert_eq!(actual_items, expected_items);
+    assert_eq!(
+        actual_payload,
+        EscrowCreatedBatchEvent {
+            batch_size: 2,
+            items: expected_items,
+            timestamp: 0,
+        }
+    );
 }
 
 #[test]
@@ -579,7 +590,10 @@ fn test_complete_escrow_with_all_releases() {
     let depositor = Address::generate(&env);
     let recipient = Address::generate(&env);
     let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
     let escrow_id = 4u64;
+
+    client.initialize(&treasury, &Some(0));
 
     // Setup token
     let (token_client, token_admin, token_address) = create_token_contract(&env, &admin);
@@ -911,11 +925,23 @@ fn test_raise_dispute_happy_path() {
     let event = events.last().unwrap();
     let expected_topics: soroban_sdk::Vec<soroban_sdk::Val> = (
         Symbol::new(&env, "Vaultix"),
+        Symbol::new(&env, "v1"),
         Symbol::new(&env, "DisputeRaised"),
-        escrow_id,
     )
         .into_val(&env);
     assert_eq!(event.1, expected_topics);
+
+    let actual_payload: DisputeRaisedEvent = event.2.into_val(&env);
+    assert_eq!(
+        actual_payload,
+        DisputeRaisedEvent {
+            escrow_id,
+            raised_by: depositor,
+            depositor: escrow.depositor,
+            recipient: escrow.recipient,
+            timestamp: 0,
+        }
+    );
 }
 
 #[test]
@@ -929,8 +955,11 @@ fn test_raise_dispute_invalid_status() {
     let depositor = Address::generate(&env);
     let recipient = Address::generate(&env);
     let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
     let escrow_id_completed = 21u64;
     let escrow_id_cancelled = 22u64;
+
+    client.initialize(&treasury, &Some(0));
 
     let (token_client, token_admin, token_address) = create_token_contract(&env, &admin);
     token_admin.mint(&depositor, &10_000);
@@ -1300,7 +1329,6 @@ fn test_unauthorized_confirm_delivery() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #4)")]
 fn test_double_confirm_delivery() {
     let env = Env::default();
     env.mock_all_auths();
@@ -1311,7 +1339,10 @@ fn test_double_confirm_delivery() {
     let buyer = Address::generate(&env);
     let seller = Address::generate(&env);
     let admin = Address::generate(&env);
+    let treasury = Address::generate(&env);
     let escrow_id = 10u64;
+
+    client.initialize(&treasury, &Some(0));
 
     let (token_client, token_admin, token_address) = create_token_contract(&env, &admin);
     token_admin.mint(&buyer, &10000);
@@ -1340,7 +1371,8 @@ fn test_double_confirm_delivery() {
 
     client.confirm_delivery(&escrow_id, &0, &buyer);
 
-    client.confirm_delivery(&escrow_id, &0, &buyer);
+    let result = client.try_confirm_delivery(&escrow_id, &0, &buyer);
+    assert_eq!(result, Err(Ok(Error::MilestoneAlreadyReleased)));
 }
 
 #[test]
